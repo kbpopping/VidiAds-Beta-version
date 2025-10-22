@@ -1,0 +1,8 @@
+{
+  "name": "VidiAds PWA",
+  "description": "A progressive web app that empowers brands, marketers, and business owners to generate professional, high-quality image, video ads, and Ad marketing content with compelling copy using AI.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
