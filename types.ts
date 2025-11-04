@@ -21,7 +21,7 @@ export interface AdCreative {
   recommendations?: string[];
 }
 
-export type View = 'dashboard' | 'create' | 'assistant' | 'calendar' | 'library' | 'profile';
+export type View = 'dashboard' | 'create' | 'assistant' | 'calendar' | 'library' | 'profile' | 'analyzer';
 
 export interface GeneratedCopy {
     platform: string;
@@ -72,3 +72,30 @@ export interface BrandKit {
 export type SocialPlatform = 'facebook' | 'instagram' | 'tiktok' | 'youtube' | 'x';
 
 export type SocialConnections = Record<SocialPlatform, boolean>;
+
+export interface ScriptAnalysis {
+  overallScore: number;
+  hookStrength: number;
+  painPointClarity: number;
+  ctaStrength: number;
+  usage: {
+    wordCount: number;
+    readingTimeSeconds: number;
+  };
+  improvements: {
+    before: string;
+    after: string;
+    suggestion: string;
+  }[];
+  annotatedScript: {
+    text: string;
+    annotation?: string | null;
+  }[];
+}
+
+export interface AnalyzedScript {
+  id: string;
+  originalScript: string;
+  analysis: ScriptAnalysis;
+  createdAt: string; // ISO string
+}

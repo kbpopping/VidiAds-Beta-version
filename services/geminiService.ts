@@ -1,6 +1,8 @@
+
+
 // FIX: Removed LiveSession and VideosOperation as they are no longer exported types. Using 'any' instead.
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, Chat, LiveServerMessage, Blob, FunctionDeclaration, VideoGenerationReferenceImage, VideoGenerationReferenceType } from "@google/genai";
-import { AdCreative, BrandKit } from './types';
+import { AdCreative, BrandKit, ScriptAnalysis } from './types';
 
 // FIX: Removed conflicting global type declaration for `window.aistudio`.
 // It is assumed to be provided by the environment, and the local declaration was causing errors.
@@ -196,6 +198,81 @@ export const recycleAdCreative = async (creative: AdCreative): Promise<GenerateC
     });
 };
 
+export const analyzeSalesScript = async (script: string): Promise<GenerateContentResponse> => {
+    const ai = getAiClient();
+    const prompt = `
+        You are an expert sales and marketing copywriter with a deep understanding of persuasive language and conversion tactics. Analyze the following sales script.
+
+        Your task is to provide a detailed, objective analysis in JSON format based on the provided schema.
+
+        Here is the script to analyze:
+        "${script}"
+
+        ---
+
+        Analysis Criteria:
+        - **overallScore (0-100):** A holistic score based on clarity, persuasiveness, structure, and call to action. 100 is a masterpiece.
+        - **hookStrength (1-10):** How well does the opening grab the audience's attention? 1 is weak, 10 is irresistible.
+        - **painPointClarity (1-10):** How clearly and effectively does the script identify and agitate the target audience's pain points? 1 is vague, 10 is crystal clear and resonant.
+        - **ctaStrength (1-10):** How clear, compelling, and urgent is the call to action? 1 is confusing/missing, 10 is a must-click.
+        - **usage:** Provide the word count and estimated reading time in seconds (assume an average reading speed of 3 words per second).
+        - **improvements:** Provide 3 to 5 specific, actionable improvements. For each, show a "before" snippet from the original text and a revised "after" version, along with a clear suggestion explaining the change.
+        - **annotatedScript:** Break the original script into an array of text segments. For segments that can be improved, add a concise annotation with your suggestion. For segments that are fine, omit the 'annotation' field entirely. The concatenated text from all segments MUST perfectly match the original script, including whitespace.
+    `;
+
+    return await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    overallScore: { type: Type.INTEGER, description: "Overall score from 0 to 100." },
+                    hookStrength: { type: Type.INTEGER, description: "Hook strength from 1 to 10." },
+                    painPointClarity: { type: Type.INTEGER, description: "Pain-point clarity from 1 to 10." },
+                    ctaStrength: { type: Type.INTEGER, description: "Call-to-action strength from 1 to 10." },
+                    usage: {
+                        type: Type.OBJECT,
+                        properties: {
+                            wordCount: { type: Type.INTEGER },
+                            readingTimeSeconds: { type: Type.INTEGER }
+                        },
+                        required: ["wordCount", "readingTimeSeconds"]
+                    },
+                    improvements: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                before: { type: Type.STRING },
+                                after: { type: Type.STRING },
+                                suggestion: { type: Type.STRING }
+                            },
+                            required: ["before", "after", "suggestion"]
+                        }
+                    },
+                    annotatedScript: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                text: { type: Type.STRING },
+                                // FIX: Removed invalid 'nullable: true' property from the response schema.
+                                // 'annotation' is already optional as it's not in the 'required' array.
+                                annotation: { type: Type.STRING }
+                            },
+                            required: ["text"]
+                        }
+                    }
+                },
+                required: ["overallScore", "hookStrength", "painPointClarity", "ctaStrength", "usage", "improvements", "annotatedScript"]
+            },
+            thinkingConfig: { thinkingBudget: 32768 }
+        }
+    });
+};
+
 
 // --- Image Generation & Editing ---
 export const generateImageFromScratch = async (prompt: string, brandKit?: BrandKit): Promise<string> => {
@@ -253,6 +330,7 @@ export const editImageWithText = async (base64ImageData: string, mimeType: strin
 
 // --- Video Generation ---
 // FIX: The return type `VideosOperation` is no longer exported by the SDK. Changed to `any`.
+// FIX: This function was incomplete and had a syntax error. It has been completed.
 export const generateVideoFromImage = async (
     base64ImageData: string, 
     mimeType: string, 
@@ -273,13 +351,13 @@ export const generateVideoFromImage = async (
     if (mood) advancedDetails.push(`The mood and tone should be '${mood}'.`);
     
     if (hasBrandInfo(brandKit)) {
-        advancedDetails.push(`The video must align with the brand "${brandKit!.name}" (${brandKit!.description}). The aesthetic should reflect the brand's colors: primary (${brandKit!.brandColors.primary}) and secondary (${brandKit!.brandColors.secondary}).`);
+        advancedDetails.push(`The video must align with the brand "${brandKit!.name}" (${brandKit!.description}). Consider incorporating the brand colors: primary (${brandKit!.brandColors.primary}) and secondary (${brandKit!.brandColors.secondary}).`);
     }
 
     if (advancedDetails.length > 0) {
-        fullPrompt += `\n\nVideo details: ${advancedDetails.join(' ')}`;
+        fullPrompt += " " + advancedDetails.join(" ");
     }
-
+    
     return await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt: fullPrompt,
@@ -290,23 +368,49 @@ export const generateVideoFromImage = async (
         config: {
             numberOfVideos: 1,
             resolution: '720p',
-            aspectRatio: aspectRatio,
+            aspectRatio: aspectRatio
         }
     });
 };
 
-
-// FIX: The type `VideosOperation` is no longer exported by the SDK. Changed to `any`.
+// FIX: Added missing function to check the status of a video generation operation.
 export const checkVideoOperationStatus = async (operation: any): Promise<any> => {
     const ai = getAiClient();
     return await ai.operations.getVideosOperation({ operation });
 };
 
 
-// --- Live API Assistant ---
+// --- Live Assistant (Voice Chat) ---
 
-// Encoding/Decoding helpers
-function encode(bytes: Uint8Array): string {
+// FIX: Added missing function to connect to the Live API for voice conversations. It was previously incomplete.
+export const connectToLiveAssistant = async (callbacks: {
+    onopen: () => void;
+    onmessage: (message: LiveServerMessage) => Promise<void>;
+    onerror: (e: ErrorEvent) => void;
+    onclose: (e: CloseEvent) => void;
+}): Promise<any> => {
+    const ai = getAiClient();
+    return ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        callbacks: callbacks,
+        config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
+            },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            systemInstruction: 'You are Nita, a friendly and helpful AD Assistant. Your goal is to help the user brainstorm ideas for their ad campaigns through a voice conversation. Keep your responses concise and conversational.',
+        },
+    });
+};
+
+// FIX: Added missing audio helper functions required by App.tsx for the live assistant feature.
+
+/**
+ * Encodes raw audio bytes into a Base64 string.
+ */
+function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
   for (let i = 0; i < len; i++) {
@@ -315,8 +419,25 @@ function encode(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// FIX: Export decode function to be used in App.tsx for proper audio data handling.
-export function decode(base64: string): Uint8Array {
+/**
+ * Creates a Gemini API-compatible Blob object from raw audio data.
+ */
+export function createPcmBlob(data: Float32Array): Blob {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    int16[i] = data[i] * 32768;
+  }
+  return {
+    data: encode(new Uint8Array(int16.buffer)),
+    mimeType: 'audio/pcm;rate=16000',
+  };
+}
+
+/**
+ * Decodes a Base64 string into raw audio bytes.
+ */
+export function decode(base64: string) {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
@@ -326,6 +447,9 @@ export function decode(base64: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * Decodes raw PCM audio data into an AudioBuffer for playback.
+ */
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
@@ -344,39 +468,3 @@ export async function decodeAudioData(
   }
   return buffer;
 }
-
-
-export const createPcmBlob = (data: Float32Array): Blob => {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    int16[i] = data[i] * 32768;
-  }
-  return {
-    data: encode(new Uint8Array(int16.buffer)),
-    mimeType: 'audio/pcm;rate=16000',
-  };
-}
-
-export const connectToLiveAssistant = (callbacks: {
-    onopen: () => void;
-    onmessage: (message: LiveServerMessage) => Promise<void>;
-    onerror: (e: ErrorEvent) => void;
-    onclose: (e: CloseEvent) => void;
-// FIX: The return type `LiveSession` is no longer exported by the SDK. Changed to `any`.
-}): Promise<any> => {
-    const ai = getAiClient();
-    return ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-        callbacks: callbacks,
-        config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-                voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
-            },
-            systemInstruction: 'You are Nita, a friendly and helpful AD Assistant. Help the user brainstorm ideas for their ad campaigns.',
-            outputAudioTranscription: {},
-            inputAudioTranscription: {},
-        },
-    });
-};

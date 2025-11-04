@@ -1,6 +1,9 @@
 
+
+
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { AdCreative, AdType, View, GeneratedCopy, ScheduledPost, AssetLibrary, LibraryAsset, ChatMessage, UserProfile, BrandKit, SocialConnections, SocialPlatform } from './types';
+import { AdCreative, AdType, View, GeneratedCopy, ScheduledPost, AssetLibrary, LibraryAsset, ChatMessage, UserProfile, BrandKit, SocialConnections, SocialPlatform, ScriptAnalysis, AnalyzedScript } from './types';
 // FIX: Import the 'decode' function for correct audio data processing.
 import { 
     generateAdCopy, 
@@ -16,7 +19,8 @@ import {
     getOptimalPostingTimes,
     recycleAdCreative,
     startChatSession,
-    sendChatMessage
+    sendChatMessage,
+    analyzeSalesScript
 } from './services/geminiService';
 // FIX: Removed LiveSession and VideosOperation as they are no longer exported types.
 import { LiveServerMessage, Chat } from '@google/genai';
@@ -53,6 +57,36 @@ const formatTime = (isoString: string) => {
         hour12: true,
     });
 }
+
+const downloadAnalysisReport = (analysis: ScriptAnalysis, originalScript: string) => {
+    let reportContent = `Sales Script Analysis Report\n`;
+    reportContent += `=============================\n\n`;
+    reportContent += `Overall Score: ${analysis.overallScore}/100\n\n`;
+    reportContent += `--- METRICS ---\n`;
+    reportContent += `- Hook Strength:      ${analysis.hookStrength}/10\n`;
+    reportContent += `- Pain-Point Clarity: ${analysis.painPointClarity}/10\n`;
+    reportContent += `- CTA Strength:       ${analysis.ctaStrength}/10\n`;
+    reportContent += `- Word Count:         ${analysis.usage.wordCount}\n`;
+    reportContent += `- Reading Time:       ${analysis.usage.readingTimeSeconds}s\n\n`;
+    reportContent += `--- SUGGESTED IMPROVEMENTS ---\n`;
+    analysis.improvements.forEach((imp, i) => {
+      reportContent += `\n#${i + 1}. ${imp.suggestion}\n`;
+      reportContent += `   - BEFORE: "${imp.before}"\n`;
+      reportContent += `   - AFTER:  "${imp.after}"\n`;
+    });
+    reportContent += `\n\n--- ORIGINAL SCRIPT ---\n`;
+    reportContent += originalScript;
+
+    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'script-analysis-report.txt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+};
 
 // --- SVG Icons ---
 const PlusIcon: React.FC<{className?: string}> = ({className}) => (
@@ -132,7 +166,7 @@ const FacebookIcon: React.FC<{className?: string}> = ({className}) => (
     <svg className={className || "w-6 h-6"} fill="currentColor" viewBox="0 0 24 24"><path d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.878V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.988C18.343 21.128 22 16.991 22 12z"/></svg>
 );
 const InstagramIcon: React.FC<{className?: string}> = ({className}) => (
-    <svg className={className || "w-6 h-6"} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37zm1.5-4.87h.01M12 2.02c-2.84 0-3.18.01-4.28.06-1.1.05-1.86.22-2.52.48a4.8 4.8 0 00-1.73 1.16 4.8 4.8 0 00-1.16 1.73c-.26.66-.43 1.42-.48 2.52-.05 1.1-.06 1.44-.06 4.28s.01 3.18.06 4.28c.05 1.1.22 1.86.48 2.52a4.8 4.8 0 001.16 1.73 4.8 4.8 0 001.73 1.16c.66.26 1.42.43 2.52.48 1.1.05 1.44.06 4.28.06s3.18-.01 4.28-.06c1.1-.05 1.86-.22 2.52-.48a4.8 4.8 0 001.73-1.16 4.8 4.8 0 001.16-1.73c.26-.66.43-1.42.48-2.52.05-1.1.06-1.44.06-4.28s-.01-3.18-.06-4.28c-.05-1.1-.22-1.86-.48-2.52a4.8 4.8 0 00-1.16-1.73 4.8 4.8 0 00-1.73-1.16c-.66-.26-1.42-.43-2.52-.48C15.18 2.03 14.84 2.02 12 2.02z"/></svg>
+    <svg className={className || "w-6 h-6"} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37zm1.5-4.87h.01M12 2.02c-2.84 0-3.18.01-4.28.06-1.1.05-1.86.22-2.52.48a4.8 4.8 0 00-1.73 1.16 4.8 4.8 0 00-1.16 1.73c-.26.66-.43 1.42-.48 2.52-.05 1.1-.06 1.44-.06 4.28s.01 3.18.06 4.28c.05 1.1.22 1.86.48 2.52a4.8 4.8 0 001.16 1.73 4.8 4.8 0 001.73 1.16c.66.26 1.42.43 2.52.48 1.1.05 1.44.06 4.28.06s3.18-.01 4.28-.06c1.1-.05 1.86-.22 2.52-.48a4.8 4.8 0 001.73-1.16 4.8 4.8 0 001.16-1.73c.26-.66.43-1.42.48-2.52.05-1.1.06-1.44-.06-4.28s-.01-3.18-.06-4.28c-.05-1.1-.22-1.86-.48-2.52a4.8 4.8 0 00-1.16-1.73 4.8 4.8 0 00-1.73-1.16c-.66-.26-1.42-.43-2.52-.48C15.18 2.03 14.84 2.02 12 2.02z"/></svg>
 );
 const TikTokIcon: React.FC<{className?: string}> = ({className}) => (
     <svg className={className || "w-6 h-6"} fill="currentColor" viewBox="0 0 24 24"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-2.43.03-4.63-1.22-5.9-3.21-1.27-1.99-1.95-4.24-1.8-6.42.12-1.63.78-3.19 1.8-4.31 1.05-1.14 2.45-1.84 3.99-1.92.01-3.09-.01-6.18 0-9.26 1.23-.04 2.38-.01 3.53-.02z"/></svg>
@@ -162,6 +196,10 @@ const Header: React.FC<{ setView: (view: View) => void; currentView: View }> = (
                 <div className={navItemClass('dashboard')} onClick={() => setView('dashboard')}>
                     <DashboardIcon />
                     <span className="hidden sm:inline">Dashboard</span>
+                </div>
+                <div className={navItemClass('analyzer')} onClick={() => setView('analyzer')}>
+                    <BrainIcon className="w-6 h-6" />
+                    <span className="hidden sm:inline">Analyzer</span>
                 </div>
                  <div className={navItemClass('library')} onClick={() => setView('library')}>
                     <LibraryIcon />
@@ -1341,20 +1379,162 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ creative, onClose, onSche
     );
 };
 
-const AdLibrary: React.FC<{ creatives: AdCreative[], assets: AssetLibrary }> = ({ creatives, assets }) => {
-    type Filter = 'all' | 'images' | 'videos' | 'copy';
+// --- NEW SALES SCRIPT ANALYZER COMPONENTS (SHARED) ---
+const ScoreCircle: React.FC<{ score: number }> = ({ score }) => {
+    const radius = 50;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference - (score / 100) * circumference;
+    const scoreColor = score >= 80 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400';
+    const ringColor = score >= 80 ? 'stroke-green-500' : score >= 50 ? 'stroke-yellow-500' : 'stroke-red-500';
+  
+    return (
+      <div className="relative w-40 h-40">
+        <svg className="w-full h-full" viewBox="0 0 120 120">
+          <circle className="stroke-slate-700" strokeWidth="10" fill="transparent" r={radius} cx="60" cy="60" />
+          <circle
+            className={`transform -rotate-90 origin-center transition-all duration-1000 ease-out ${ringColor}`}
+            strokeWidth="10"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference} // Start empty
+            style={{ strokeDashoffset: strokeDashoffset }}
+            strokeLinecap="round"
+            fill="transparent"
+            r={radius}
+            cx="60"
+            cy="60"
+          />
+        </svg>
+        <div className={`absolute inset-0 flex flex-col items-center justify-center ${scoreColor}`}>
+          <span className="text-4xl font-bold">{score}</span>
+          <span className="text-sm font-semibold">/ 100</span>
+        </div>
+      </div>
+    );
+};
+  
+const MetricCard: React.FC<{ title: string; value: string | number; subtitle?: string; score?: number; maxScore?: number }> = ({ title, value, subtitle, score, maxScore }) => (
+    <div className="bg-slate-900 p-4 rounded-lg flex flex-col justify-between border border-slate-700/50">
+      <div>
+        <h4 className="text-slate-400 text-sm font-medium">{title}</h4>
+        <div className="flex items-baseline space-x-2 mt-2">
+          <span className="text-2xl font-bold text-white">{value}</span>
+          {subtitle && <span className="text-slate-500">{subtitle}</span>}
+        </div>
+      </div>
+      {score !== undefined && maxScore !== undefined && (
+        <div className="w-full bg-slate-700 rounded-full h-2 mt-3">
+            <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${(score / maxScore) * 100}%` }}></div>
+        </div>
+      )}
+    </div>
+);
+
+const ImprovementCard: React.FC<{ improvement: ScriptAnalysis['improvements'][0], index: number }> = ({ improvement, index }) => (
+    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+        <h5 className="font-semibold text-blue-400 mb-3">Improvement #{index + 1}: {improvement.suggestion}</h5>
+        <div className="text-sm space-y-3">
+            <blockquote className="border-l-2 border-red-500/70 pl-3 text-slate-400 italic">
+                <p>"{improvement.before}"</p>
+            </blockquote>
+            <blockquote className="border-l-2 border-green-500/70 pl-3 text-white">
+                <p>"{improvement.after}"</p>
+            </blockquote>
+        </div>
+    </div>
+);
+
+const AnnotatedScript: React.FC<{ annotatedScript: ScriptAnalysis['annotatedScript'] }> = ({ annotatedScript }) => (
+    <div>
+        <h3 className="text-xl font-semibold mb-4">Annotated Script</h3>
+        <div className="bg-slate-900/50 p-4 rounded-lg leading-relaxed border border-slate-700/50 whitespace-pre-wrap">
+            <p>
+                {/* FIX: Add a guard to ensure annotatedScript is an array before mapping. */}
+                {Array.isArray(annotatedScript) && (annotatedScript as any[]).map((part, index) =>
+                    part.annotation ? (
+                        <span key={index} className="relative group cursor-pointer">
+                            <span className="bg-yellow-500/20 underline decoration-yellow-500 decoration-dotted">
+                                {part.text}
+                            </span>
+                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 w-64 p-2 mb-2 bg-slate-700 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                {part.annotation}
+                            </span>
+                        </span>
+                    ) : (
+                        <span key={index}>{part.text}</span>
+                    )
+                )}
+            </p>
+        </div>
+    </div>
+);
+
+const AnalysisResultView: React.FC<{ analysis: ScriptAnalysis }> = ({ analysis }) => (
+    <div className="space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="sm:col-span-1 bg-slate-800 p-6 rounded-xl flex flex-col items-center justify-center border border-slate-700">
+                <h3 className="text-lg font-semibold mb-2">Overall Score</h3>
+                <ScoreCircle score={analysis.overallScore} />
+            </div>
+            <div className="sm:col-span-2 grid grid-cols-2 gap-4">
+                <MetricCard title="Hook Strength" score={analysis.hookStrength} maxScore={10} value={analysis.hookStrength} />
+                <MetricCard title="CTA Strength" score={analysis.ctaStrength} maxScore={10} value={analysis.ctaStrength} />
+                <MetricCard title="Pain-Point Clarity" score={analysis.painPointClarity} maxScore={10} value={analysis.painPointClarity} />
+                <MetricCard title="Word Count" value={analysis.usage.wordCount} subtitle={`${analysis.usage.readingTimeSeconds}s read`} />
+            </div>
+        </div>
+        <div>
+            <h3 className="text-xl font-semibold mb-4">Actionable Improvements</h3>
+            <div className="space-y-4">
+                {analysis.improvements.map((imp, i) => (
+                    <ImprovementCard key={i} improvement={imp} index={i} />
+                ))}
+            </div>
+        </div>
+        <AnnotatedScript annotatedScript={analysis.annotatedScript} />
+    </div>
+);
+
+const ScriptAnalysisModal: React.FC<{ script: AnalyzedScript, onClose: () => void }> = ({ script, onClose }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex justify-center items-center z-50 p-4" onClick={onClose}>
+            <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-700" onClick={e => e.stopPropagation()}>
+                <div className="p-4 bg-slate-900/70 border-b border-slate-700 flex justify-between items-center">
+                    <div>
+                        <h3 className="text-xl font-bold text-white">Script Analysis</h3>
+                        <p className="text-sm text-slate-400">Created on {formatDate(script.createdAt)}</p>
+                    </div>
+                     <button
+                        onClick={() => downloadAnalysisReport(script.analysis, script.originalScript)}
+                        className="flex items-center space-x-2 text-sm bg-blue-600 hover:bg-blue-700 py-2 px-3 rounded-lg transition-colors text-white"
+                    >
+                        <DownloadIcon />
+                        <span>Download Report</span>
+                    </button>
+                </div>
+                <div className="p-6 space-y-4 overflow-y-auto">
+                    <AnalysisResultView analysis={script.analysis} />
+                </div>
+                 <div className="p-4 bg-slate-900 border-t border-slate-700 flex justify-end">
+                    <button onClick={onClose} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg">Close</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const AdLibrary: React.FC<{ creatives: AdCreative[], assets: AssetLibrary, analyzedScripts: AnalyzedScript[] }> = ({ creatives, assets, analyzedScripts }) => {
+    type Filter = 'all' | 'images' | 'videos' | 'copy' | 'scripts';
     const [filter, setFilter] = useState<Filter>('all');
     const [searchQuery, setSearchQuery] = useState('');
+    const [viewingScript, setViewingScript] = useState<AnalyzedScript | null>(null);
 
-    // FIX: Refactored to combine allCopies and filteredCopies logic into a single useMemo hook.
-    // This simplifies the dependency chain and can help avoid potential TypeScript inference issues.
     const filteredCopies = useMemo(() => {
         const allUniqueCopies = Array.from(new Set(creatives.flatMap(c => c.copies.map(copy => copy.text))));
         if (!searchQuery) {
             return allUniqueCopies;
         }
         const lowercasedQuery = searchQuery.toLowerCase();
-        return allUniqueCopies.filter(copy => copy.toLowerCase().includes(lowercasedQuery));
+        return allUniqueCopies.filter(copy => typeof copy === 'string' && copy.toLowerCase().includes(lowercasedQuery));
     }, [creatives, searchQuery]);
 
     const filteredAssets = useMemo(() => {
@@ -1364,6 +1544,14 @@ const AdLibrary: React.FC<{ creatives: AdCreative[], assets: AssetLibrary }> = (
             asset.prompt.toLowerCase().includes(lowercasedQuery)
         );
     }, [assets, searchQuery]);
+    
+    const filteredScripts = useMemo(() => {
+        if (!searchQuery) return analyzedScripts;
+        const lowercasedQuery = searchQuery.toLowerCase();
+        return analyzedScripts.filter(script => 
+            script.originalScript.toLowerCase().includes(lowercasedQuery)
+        );
+    }, [analyzedScripts, searchQuery]);
 
     const images = useMemo(() => filteredAssets.filter(a => a.type === 'image'), [filteredAssets]);
     const videos = useMemo(() => filteredAssets.filter(a => a.type === 'video'), [filteredAssets]);
@@ -1390,6 +1578,7 @@ const AdLibrary: React.FC<{ creatives: AdCreative[], assets: AssetLibrary }> = (
                     <button onClick={() => setFilter('images')} className={filterButtonClass('images')}>Images</button>
                     <button onClick={() => setFilter('videos')} className={filterButtonClass('videos')}>Videos</button>
                     <button onClick={() => setFilter('copy')} className={filterButtonClass('copy')}>Ad Copy</button>
+                    <button onClick={() => setFilter('scripts')} className={filterButtonClass('scripts')}>Scripts</button>
                 </div>
                  <div className="relative w-full md:w-1/3">
                     <input
@@ -1402,6 +1591,32 @@ const AdLibrary: React.FC<{ creatives: AdCreative[], assets: AssetLibrary }> = (
                     <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                 </div>
             </div>
+
+            {((filter === 'all' || filter === 'scripts') && filteredScripts.length > 0) && (
+                <div className="mb-8">
+                    <h3 className="text-2xl font-semibold text-white mb-4">Analyzed Scripts</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredScripts.map((script) => (
+                            <div key={script.id} className="bg-slate-800 rounded-lg p-4 flex flex-col justify-between border border-slate-700">
+                               <div>
+                                 <p className="text-sm text-slate-300 mb-3 h-20 overflow-hidden text-ellipsis">"{script.originalScript}"</p>
+                                 <p className="text-xs text-slate-500">Analyzed on {formatDate(script.createdAt)}</p>
+                               </div>
+                               <div className="mt-4 flex justify-between items-center pt-3 border-t border-slate-700">
+                                    <div className="font-semibold">
+                                        <span className="text-slate-400 text-sm">Score: </span>
+                                        <span className="text-white text-lg">{script.analysis.overallScore}</span>
+                                        <span className="text-slate-500 text-sm">/100</span>
+                                    </div>
+                                    <button onClick={() => setViewingScript(script)} className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg">
+                                        View Analysis
+                                    </button>
+                               </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {((filter === 'all' || filter === 'images') && images.length > 0) && (
                 <div className="mb-8">
@@ -1453,12 +1668,13 @@ const AdLibrary: React.FC<{ creatives: AdCreative[], assets: AssetLibrary }> = (
                 </div>
             )}
             
-            {(filter === 'all' && assets.length === 0) && (
+            {(filter === 'all' && assets.length === 0 && analyzedScripts.length === 0) && (
                  <div className="text-center py-20 bg-slate-800 rounded-xl">
                     <p className="text-slate-400">Your asset library is empty.</p>
-                    <p className="text-slate-500 mt-2">Create a new ad to start adding assets.</p>
+                    <p className="text-slate-500 mt-2">Create a new ad or analyze a script to start adding assets.</p>
                 </div>
             )}
+            {viewingScript && <ScriptAnalysisModal script={viewingScript} onClose={() => setViewingScript(null)} />}
         </div>
     );
 };
@@ -1646,6 +1862,106 @@ const UserProfilePage: React.FC<{
     );
 };
 
+const SalesScriptAnalyzer: React.FC<{ addAnalyzedScript: (script: AnalyzedScript) => void }> = ({ addAnalyzedScript }) => {
+    const [script, setScript] = useState('');
+    const [analysis, setAnalysis] = useState<ScriptAnalysis | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+  
+    const handleAnalyze = async () => {
+      if (script.trim().length < 20) {
+        setError('Please enter a script of at least 20 characters to analyze.');
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      setAnalysis(null);
+      try {
+        const response = await analyzeSalesScript(script);
+        const result = JSON.parse(response.text) as ScriptAnalysis;
+        setAnalysis(result);
+        
+        // Auto-save the analysis to the library
+        const newAnalyzedScript: AnalyzedScript = {
+          id: new Date().toISOString(),
+          originalScript: script,
+          analysis: result,
+          createdAt: new Date().toISOString(),
+        };
+        addAnalyzedScript(newAnalyzedScript);
+
+      } catch (e) {
+        console.error("Analysis failed:", e);
+        setError("Sorry, an error occurred while analyzing the script. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+  
+    return (
+      <div className="p-8 max-w-7xl mx-auto">
+        <div className="text-center">
+            <h2 className="text-3xl font-bold text-white">Sales Script Analyzer</h2>
+            <p className="text-slate-400 mt-1">Get your copy's score in 10 seconds.</p>
+        </div>
+        
+        <div className="grid lg:grid-cols-2 gap-8 mt-8">
+            {/* Input Column */}
+            <div className="flex flex-col">
+              <textarea
+                value={script}
+                onChange={(e) => setScript(e.target.value)}
+                rows={15}
+                className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none flex-grow text-base"
+                placeholder="Paste your sales script, ad copy, or email draft here..."
+              />
+              <button
+                onClick={handleAnalyze}
+                disabled={isLoading}
+                className="mt-4 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg transition-colors text-lg flex items-center justify-center space-x-2"
+              >
+                {isLoading ? <SmallSpinner /> : <BrainIcon className="w-6 h-6"/>}
+                <span>{isLoading ? 'Analyzing...' : 'Analyze Script'}</span>
+              </button>
+               {error && <p className="text-red-400 text-sm mt-2 text-center">{error}</p>}
+            </div>
+  
+            {/* Results Column */}
+            <div className="h-full">
+              {isLoading && (
+                  <div className="flex flex-col items-center justify-center h-full bg-slate-800 rounded-xl border border-slate-700 p-8">
+                    <Spinner />
+                    <p className="mt-4 text-slate-300">Analyzing your script...</p>
+                  </div>
+              )}
+               {!isLoading && !analysis && (
+                  <div className="flex flex-col items-center justify-center h-full bg-slate-800 rounded-xl border-2 border-dashed border-slate-700 p-8 text-center">
+                    <BrainIcon className="w-16 h-16 text-slate-600 mb-4"/>
+                    <h3 className="text-xl font-semibold text-white">Your analysis will appear here</h3>
+                    <p className="text-slate-400 mt-2">Paste your script on the left and click "Analyze" to see your score, detailed metrics, and AI-powered suggestions.</p>
+                  </div>
+              )}
+              {analysis && (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex justify-between items-center mb-2">
+                         <h3 className="text-xl font-semibold">Analysis Results</h3>
+                         <button
+                            onClick={() => downloadAnalysisReport(analysis, script)}
+                            className="flex items-center space-x-2 text-sm bg-slate-600 hover:bg-slate-500 py-2 px-3 rounded-lg transition-colors"
+                        >
+                            <DownloadIcon />
+                            <span>Download Report</span>
+                        </button>
+                    </div>
+                    <AnalysisResultView analysis={analysis} />
+                </div>
+              )}
+            </div>
+        </div>
+      </div>
+    );
+};
+
 
 // --- Main App Component ---
 
@@ -1655,6 +1971,7 @@ const App: React.FC = () => {
     const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
     const [schedulingCreative, setSchedulingCreative] = useState<AdCreative | null>(null);
     const [assetLibrary, setAssetLibrary] = useState<AssetLibrary>([]);
+    const [analyzedScripts, setAnalyzedScripts] = useState<AnalyzedScript[]>([]);
     const [userProfile, setUserProfile] = useState<UserProfile>({
         name: 'Jane Doe',
         email: 'jane.doe@example.com'
@@ -1688,6 +2005,10 @@ const App: React.FC = () => {
         });
     }, []);
 
+    const addAnalyzedScript = (script: AnalyzedScript) => {
+        setAnalyzedScripts(prev => [script, ...prev]);
+    };
+
     const handleScheduleCreative = (creative: AdCreative) => {
         setSchedulingCreative(creative);
     };
@@ -1704,10 +2025,12 @@ const App: React.FC = () => {
                 return <AdCreator addCreative={addCreative} addAssetsToLibrary={addAssetsToLibrary} setView={setView} brandKit={brandKit} />;
             case 'assistant':
                 return <AIAssistant />;
+            case 'analyzer':
+                return <SalesScriptAnalyzer addAnalyzedScript={addAnalyzedScript} />;
             case 'calendar':
                 return <CalendarView posts={scheduledPosts} creatives={adCreatives} />;
             case 'library':
-                return <AdLibrary creatives={adCreatives} assets={assetLibrary} />;
+                return <AdLibrary creatives={adCreatives} assets={assetLibrary} analyzedScripts={analyzedScripts} />;
             case 'profile':
                 return <UserProfilePage 
                             profile={userProfile} 
